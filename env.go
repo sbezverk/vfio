@@ -7,7 +7,8 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
-	"workspace/linux/environment/vfio"
+
+	"github.com/sbezverk/vfio/vfio"
 )
 
 const (
