@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/sbezverk/vfio/vfio"
+	vfio "github.com/sbezverk/vfio/vfio-utils"
 )
 
 const (
@@ -126,7 +126,7 @@ func main() {
 	fmt.Printf("Group %d status: %+v Flags: %b \n", group, groupStatus, groupStatus.Flags)
 	fmt.Printf("PCI Address: %s\n", v[0].PCIAddr)
 	pciAddr := v[0].PCIAddr
-	device, err := vfio.GetGroupFD(group, &pciAddr)
+	device, err := vfio.GetGroupFD(group, pciAddr)
 	if err != nil {
 		fmt.Printf("Fail to get group file descriptor %+v.\n", err)
 		os.Exit(1)

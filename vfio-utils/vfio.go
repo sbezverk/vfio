@@ -1,4 +1,4 @@
-package vfio
+package vfio_utils
 
 import (
 	"fmt"
@@ -198,18 +198,15 @@ func SetGroupContainer(group int, container int) error {
 }
 
 // GetGroupFD gets File descriptor for a specified by PCI address device
-func GetGroupFD(group int, pciDevice *string) (int, error) {
-	fmt.Printf("VFIO_GROUP_GET_DEVICE_FD() returned: %04x\n", VFIO_GROUP_GET_DEVICE_FD())
-	buffer := make([]byte, len(*pciDevice)+1)
-	for i, c := range *pciDevice {
-		buffer[i] = uint8(c)
-	}
-	buffer[len(*pciDevice)] = 0x0
+func GetGroupFD(group int, pciDevice string) (int, error) {
+	buffer, _ := syscall.ByteSliceFromString(pciDevice)
+	ioctlID := VFIO_GROUP_GET_DEVICE_FD()
+	fmt.Printf("VFIO_GROUP_GET_DEVICE_FD() returned: %04x\n", ioctlID)
 	fmt.Printf("pciDevice: %s\n", string(buffer))
 	device, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
 		uintptr(group),
-		uintptr(VFIO_GROUP_GET_DEVICE_FD()),
+		uintptr(ioctlID),
 		uintptr(unsafe.Pointer(&buffer[0])),
 	)
 	if errno != 0 {
