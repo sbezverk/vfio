@@ -1,69 +1,29 @@
 package main
 
 import (
-	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"syscall"
 	"unsafe"
 
 	vfio "github.com/sbezverk/vfio/vfio-utils"
 )
 
-const (
-	nsmVFPrefix = "NSM_VFS_"
+var (
+	iommuGroup = flag.Int("iommu-group", 0, "IOMMU group ID")
+	pciAddress = flag.String("pci-address", "", "PCI address of vfio device")
 )
 
-// vfioConfig is stuct used to store vfio device specific information
-type vfioConfig struct {
-	VFIODevice string `yaml:"vfioDevice" json:"vfioDevice"`
-	PCIAddr    string `yaml:"pciAddr" json:"pciAddr"`
-}
-
-func getNetworkServicesConfigs() (map[string][]*vfioConfig, error) {
-	found := false
-	networkServices := map[string][]*vfioConfig{}
-	for _, env := range os.Environ() {
-		key := strings.Split(env, "=")[0]
-		val := strings.Split(env, "=")[1]
-		if strings.HasPrefix(key, nsmVFPrefix) {
-			found = true
-			networkServiceName := strings.Split(key, nsmVFPrefix)[1]
-			f, err := os.Open(val)
-			if err != nil {
-				return nil, fmt.Errorf("failed to open config file for network service %s with error: %+v", networkServiceName, err)
-			}
-			defer f.Close()
-			d := json.NewDecoder(f)
-			vc := []*vfioConfig{}
-			if err := d.Decode(&vc); err != nil {
-				return nil, fmt.Errorf("failed to decode config file for network service %s with error: %+v", networkServiceName, err)
-			}
-			networkServices[networkServiceName] = vc
-		}
-	}
-	if !found {
-		return nil, fmt.Errorf("no any Network Services found in Environment Variables")
-	}
-
-	return networkServices, nil
-}
-
 func main() {
+
+	flag.Parse()
+	if (*iommuGroup == 0) || (*pciAddress == "") {
+		fmt.Printf("Missing input parameters, exiting...")
+		os.Exit(1)
+	}
 	groupStatus := vfio.GroupStatus{
 		Argsz: uint32(unsafe.Sizeof(vfio.GroupStatus{})),
-	}
-	networkServices, err := getNetworkServicesConfigs()
-	if err != nil {
-		fmt.Printf("Something happened while getting network services config: %+v\n", err)
-	} else {
-		for k, v := range networkServices {
-			fmt.Printf("Network Services: %s\n", k)
-			for _, p := range v {
-				fmt.Printf("\t device: %s pci address: %s\n", p.VFIODevice, p.PCIAddr)
-			}
-		}
 	}
 
 	// Attempting to open /dev/vfio/vfio
@@ -74,12 +34,10 @@ func main() {
 	}
 	fmt.Printf("Open container succeeded, handle: %d\n", container)
 
-	// Attempting to open group /dev/vfio/{group-id}
-	// Since it is just an example, vlan10 network service is used
-	v := networkServices["vlan10"]
-	group, err := syscall.Open(v[0].VFIODevice, syscall.O_RDWR, 0777)
+	groupPath := fmt.Sprintf("/dev/vfio/%d", *iommuGroup)
+	group, err := syscall.Open(groupPath, syscall.O_RDWR, 0777)
 	if err != nil {
-		fmt.Printf("Something happened while opening %s, error: %+v\n", v[0].VFIODevice, err)
+		fmt.Printf("Something happened while opening %s, error: %+v\n", groupPath, err)
 		os.Exit(1)
 	}
 	fmt.Printf("Open group succeeded, handle: %d\n", group)
@@ -124,9 +82,8 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Group %d status: %+v Flags: %b \n", group, groupStatus, groupStatus.Flags)
-	fmt.Printf("PCI Address: %s\n", v[0].PCIAddr)
-	pciAddr := v[0].PCIAddr
-	device, err := vfio.GetGroupFD(group, pciAddr)
+	fmt.Printf("PCI Address: %s\n", *pciAddress)
+	device, err := vfio.GetGroupFD(group, *pciAddress)
 	if err != nil {
 		fmt.Printf("Fail to get group file descriptor %+v.\n", err)
 		os.Exit(1)
