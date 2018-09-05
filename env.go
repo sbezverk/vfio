@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	vfio "github.com/sbezverk/vfio/vfio-utils"
+	vfio "workspace/linux/environment/vfio-utils"
 )
 
 var (
@@ -40,12 +40,28 @@ func main() {
 		fmt.Printf("Something happened while opening %s, error: %+v\n", groupPath, err)
 		os.Exit(1)
 	}
+	// Status before setting group's container
 	fmt.Printf("Open group succeeded, handle: %d\n", group)
 	if err := vfio.GetGroupStatus(group, &groupStatus); err != nil {
 		fmt.Printf("Fail to get group status with error: %+v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Group %d status Flags: %b \n", group, groupStatus.Flags)
+	fmt.Printf("Group: %d status Flags: %b before setting up to a container: %d\n", group, groupStatus.Flags, container)
+	if (groupStatus.Flags & vfio.VFIO_GROUP_FLAGS_VIABLE) != vfio.VFIO_GROUP_FLAGS_VIABLE {
+		fmt.Printf("The group is not viable, exiting...\n")
+		os.Exit(1)
+	}
+	// Setting up group's container
+	if err := vfio.SetGroupContainer(group, container); err != nil {
+		fmt.Printf("Fail to set group's container with error: %+v\n", err)
+		os.Exit(1)
+	}
+	// Status after setting group's container
+	if err := vfio.GetGroupStatus(group, &groupStatus); err != nil {
+		fmt.Printf("Fail to get group status with error: %+v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Group: %d status Flags: %b after setting up to a container: %d\n", group, groupStatus.Flags, container)
 	if (groupStatus.Flags & vfio.VFIO_GROUP_FLAGS_VIABLE) != vfio.VFIO_GROUP_FLAGS_VIABLE {
 		fmt.Printf("The group is not viable, exiting...\n")
 		os.Exit(1)
@@ -58,31 +74,23 @@ func main() {
 	}
 	if found {
 		fmt.Printf("Device: %d supports VFIO_TYPE1_IOMMU\n", container)
+		if err := vfio.SetContainerIOMMU(container, vfio.VFIO_TYPE1_IOMMU); err != nil {
+			fmt.Printf("Failed to set container %d for VFIO_TYPE1_IOMMU type with error: %+v\n", container, err)
+			os.Exit(1)
+		}
 	} else {
 		fmt.Printf("Device: %d does not support VFIO_TYPE1_IOMMU\n", container)
+		if err := vfio.SetContainerIOMMU(container, vfio.VFIO_NOIOMMU_IOMMU); err != nil {
+			fmt.Printf("Failed to set container %d for VFIO_NOIOMMU_IOMMU type with error: %+v\n", container, err)
+			os.Exit(1)
+		}
 	}
 
-	found, err = vfio.CheckExtension(container, vfio.VFIO_NOIOMMU_IOMMU)
-	if err != nil {
-		fmt.Printf("Failed to check for supported extension: %04x with error: %+v\n", vfio.VFIO_NOIOMMU_IOMMU, err)
-		os.Exit(1)
-	}
-	if found {
-		fmt.Printf("Device: %d supports VFIO_NOIOMMU_IOMMU\n", container)
-	} else {
-		fmt.Printf("Device: %d does not support VFIO_NOIOMMU_IOMMU\n", container)
-	}
-
-	if err := vfio.SetGroupContainer(group, container); err != nil {
-		fmt.Printf("Fail to set group's container with error: %+v\n", err)
-		os.Exit(1)
-	}
 	if err := vfio.GetGroupStatus(group, &groupStatus); err != nil {
 		fmt.Printf("Fail to get group status with error: %+v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Group %d status: %+v Flags: %b \n", group, groupStatus, groupStatus.Flags)
-	fmt.Printf("PCI Address: %s\n", *pciAddress)
 	device, err := vfio.GetGroupFD(group, *pciAddress)
 	if err != nil {
 		fmt.Printf("Fail to get group file descriptor %+v.\n", err)
@@ -97,4 +105,28 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Group %d device info: %+v\n", group, deviceInfo)
+
+	for r := uint32(0); r < deviceInfo.NumRegions; r++ {
+		regionInfo := vfio.RegionInfo{
+			Argsz: uint32(unsafe.Sizeof(vfio.RegionInfo{})),
+			Index: r,
+		}
+		if err := vfio.GetRegionInfo(device, &regionInfo); err != nil {
+			fmt.Printf("Fail to get region %d info with error: %+v\n", r, err)
+			continue
+		}
+		fmt.Printf("Region %d info: Flags: %08b Size: %#x Offset: %#x\n", r, regionInfo.Flags, regionInfo.Size, regionInfo.Offset)
+	}
+
+	for i := uint32(0); i < deviceInfo.NumIRQs; i++ {
+		irqInfo := vfio.IRQInfo{
+			Argsz: uint32(unsafe.Sizeof(vfio.IRQInfo{})),
+			Index: i,
+		}
+		if err := vfio.GetIRQInfo(device, &irqInfo); err != nil {
+			fmt.Printf("Fail to get IRQ index %d info with error: %+v\n", i, err)
+			continue
+		}
+		fmt.Printf("IRQ index %d info: Flags: %08b Count: %d\n", i, irqInfo.Flags, irqInfo.Count)
+	}
 }
